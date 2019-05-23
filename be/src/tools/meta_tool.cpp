@@ -64,7 +64,7 @@ void show_meta() {
     OLAPStatus s = tablet_meta.create_from_file(FLAGS_pb_meta_path);
     if (s != OLAP_SUCCESS){
         std::cout << "load pb meta file:" << FLAGS_pb_meta_path << " failed"
-                  << std::endl;
+                  << ", status:" << s << std::endl;
         return;
     }
     std::string json_meta;
@@ -82,7 +82,7 @@ void get_meta(DataDir *data_dir) {
     OLAPStatus s = TabletMetaManager::get_json_header(data_dir, FLAGS_tablet_id, FLAGS_schema_hash, &value);
     if (s == doris::OLAP_ERR_META_KEY_NOT_FOUND) {
         std::cout << "no tablet meta for tablet_id:" << FLAGS_tablet_id
-                  << " schema_hash:" << FLAGS_schema_hash;
+                  << ", schema_hash:" << FLAGS_schema_hash << std::endl;
         return;
     }
     std::cout << value << std::endl;
@@ -92,7 +92,7 @@ void load_meta(DataDir *data_dir) {
     // load json tablet meta into meta
     OLAPStatus s = TabletMetaManager::load_json_header(data_dir, FLAGS_json_meta_path);
     if (s != OLAP_SUCCESS) {
-        std::cout << "load meta failed" << std::endl;
+        std::cout << "load meta failed, status:" << s << std::endl;
         return;
     }
     std::cout << "load meta successfully" << std::endl;
@@ -102,7 +102,8 @@ void delete_meta(DataDir *data_dir) {
     OLAPStatus s = TabletMetaManager::remove(data_dir, FLAGS_tablet_id, FLAGS_schema_hash);
     if (s != OLAP_SUCCESS) {
         std::cout << "delete tablet meta failed for tablet_id:" << FLAGS_tablet_id
-                  << " schema_hash:" << FLAGS_schema_hash << std::endl;
+                  << ", schema_hash:" << FLAGS_schema_hash
+                  << ", status:" << s << std::endl;
         return;
     }
     std::cout << "delete meta successfully" << std::endl;
@@ -135,7 +136,6 @@ int main(int argc, char **argv) {
             return -1;
         }
 
-        std::cout << "root_path:" << root_path.string() << std::endl;
         std::unique_ptr<DataDir> data_dir(new (std::nothrow) DataDir(root_path.string()));
         if (data_dir == nullptr) {
             std::cout << "new data dir failed" << std::endl;
