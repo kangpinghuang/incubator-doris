@@ -69,6 +69,8 @@ Status SegmentWriter::init(uint32_t write_mbytes_per_sec) {
         if (column.is_key()) {
             opts.need_zone_map = true;
         }
+        opts.is_bf_column = column.is_bf_column();
+        LOG(INFO) << "column_id:" << column_id << ", opts.is_bf_column:" << opts.is_bf_column;
         std::unique_ptr<ColumnWriter> writer(new ColumnWriter(opts, type_info, is_nullable, _output_file.get()));
         RETURN_IF_ERROR(writer->init());
         _column_writers.push_back(writer.release());
@@ -109,6 +111,7 @@ Status SegmentWriter::finalize(uint32_t* segment_file_size) {
     RETURN_IF_ERROR(_write_data());
     RETURN_IF_ERROR(_write_ordinal_index());
     RETURN_IF_ERROR(_write_zone_map());
+    RETURN_IF_ERROR(_write_bloom_filter());
     RETURN_IF_ERROR(_write_short_key_index());
     RETURN_IF_ERROR(_write_footer());
     return Status::OK();
@@ -133,6 +136,13 @@ Status SegmentWriter::_write_ordinal_index() {
 Status SegmentWriter::_write_zone_map() {
     for (auto column_writer : _column_writers) {
         RETURN_IF_ERROR(column_writer->write_zone_map());
+    }
+    return Status::OK();
+}
+
+Status SegmentWriter::_write_bloom_filter() {
+    for (auto column_writer : _column_writers) {
+        RETURN_IF_ERROR(column_writer->write_bloom_filter());
     }
     return Status::OK();
 }

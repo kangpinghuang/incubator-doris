@@ -113,6 +113,12 @@ Status ColumnWriter::init() {
     if (_opts.need_zone_map) {
         _column_zone_map_builder.reset(new ColumnZoneMapBuilder(_type_info));
     }
+
+	if (_opts.is_bf_column) {
+        LOG(INFO) << "column is bf column";
+        _bloom_filter_page_builder.reset(new BloomFilterPageBuilder(_type_info,
+                _opts.bloom_filter_block_size, _opts.fpp));
+    }
     return Status::OK();
 }
 
@@ -121,6 +127,9 @@ Status ColumnWriter::append_nulls(size_t num_rows) {
     _next_rowid += num_rows;
     if (_opts.need_zone_map) {
         RETURN_IF_ERROR(_column_zone_map_builder->add(nullptr, 1));
+    }
+	if (_opts.is_bf_column) {
+        _bloom_filter_page_builder->add(nullptr, num_rows);
     }
     return Status::OK();
 }
@@ -139,6 +148,9 @@ Status ColumnWriter::_append_data(const uint8_t** ptr, size_t num_rows) {
         RETURN_IF_ERROR(_page_builder->add(*ptr, &num_written));
         if (_opts.need_zone_map) {
             RETURN_IF_ERROR(_column_zone_map_builder->add(*ptr, num_written));
+        }
+		if (_opts.is_bf_column) {
+            RETURN_IF_ERROR(_bloom_filter_page_builder->add(*ptr, num_written));
         }
 
         bool is_page_full = (num_written < remaining);
@@ -171,6 +183,9 @@ Status ColumnWriter::append_nullable(
             if (_opts.need_zone_map) {
                 RETURN_IF_ERROR(_column_zone_map_builder->add(nullptr, 1));
             }
+			if (_opts.is_bf_column) {
+                _bloom_filter_page_builder->add(nullptr, this_run);
+			}
         } else {
             RETURN_IF_ERROR(_append_data(&ptr, this_run));
         }
@@ -206,6 +221,15 @@ Status ColumnWriter::write_zone_map() {
     return Status::OK();
 }
 
+Status ColumnWriter::write_bloom_filter() {
+    if (_opts.is_bf_column) {
+        Slice data = _bloom_filter_page_builder->finish();
+        std::vector<Slice> slices{data};
+        return _write_physical_page(&slices, &_bloom_filter_pp);
+    }
+    return Status::OK();
+}
+
 void ColumnWriter::write_meta(ColumnMetaPB* meta) {
     meta->set_type(_type_info->type());
     meta->set_encoding(_opts.encoding_type);
@@ -214,6 +238,10 @@ void ColumnWriter::write_meta(ColumnMetaPB* meta) {
     _ordinal_index_pp.to_proto(meta->mutable_ordinal_index_page());
     if (_opts.need_zone_map) {
         _zone_map_pp.to_proto(meta->mutable_zone_map_page());
+    }
+    if (_opts.is_bf_column) {
+        _bloom_filter_pp.to_proto(meta->mutable_bloom_filter_page());
+        LOG(INFO) << "write bf page pointer";
     }
 }
 

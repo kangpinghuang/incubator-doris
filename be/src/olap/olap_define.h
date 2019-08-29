@@ -91,6 +91,7 @@ static const uint64_t GB_EXCHANGE_BYTE = 1024 * 1024 * 1024;
 
 // bloom filter fpp
 static const double BLOOM_FILTER_DEFAULT_FPP = 0.05;
+static const uint64_t DEFAULT_SEED = 104729;
 
 #define OLAP_GOTO(label) goto label
 

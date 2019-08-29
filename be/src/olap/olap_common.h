@@ -243,6 +243,8 @@ typedef std::map<ColumnId, ColumnId> UniqueIdToColumnIdMap;
 
 typedef int64_t RowsetId;
 
+static const uint64_t DEFAULT_SEED = 104729;
+
 }  // namespace doris
 
 #endif // DORIS_BE_SRC_OLAP_OLAP_COMMON_H

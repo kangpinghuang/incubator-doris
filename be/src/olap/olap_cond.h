@@ -30,6 +30,7 @@
 #include "olap/stream_index_common.h"
 #include "olap/field.h"
 #include "olap/row_cursor.h"
+#include "olap/rowset/segment_v2/bloom_filter.h"
 
 namespace doris {
 
@@ -79,6 +80,8 @@ public:
 
     bool eval(const BloomFilter& bf) const;
 
+    bool eval(const segment_v2::BloomFilter& bf) const;
+
     CondOp op;
     // valid when op is not OP_IN
     WrapperField* operand_field;
@@ -108,6 +111,8 @@ public:
     int del_eval(const std::pair<WrapperField*, WrapperField*>& statistic) const;
 
     bool eval(const BloomFilter& bf) const;
+
+    bool eval(const segment_v2::BloomFilter& bf);
 
     inline bool is_key() const {
         return _is_key;

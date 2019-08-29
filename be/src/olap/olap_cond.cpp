@@ -459,7 +459,50 @@ bool Cond::eval(const BloomFilter& bf) const {
         break;
     }
 
-    return false;
+    return true;
+}
+
+bool Cond::eval(const segment_v2::BloomFilter& bf) const {
+    //通过单列上BloomFilter对block进行过滤。
+    switch (op) {
+    case OP_EQ: {
+        segment_v2::BloomKeyProbe key;
+        if (operand_field->is_string_type()) {
+            Slice* slice = reinterpret_cast<Slice*>(operand_field->ptr());
+            key.init(*slice);
+        } else {
+            key.init({operand_field->ptr(), operand_field->size()});
+        }
+        LOG(INFO) << "op is EQ, operand_field:" << operand_field->to_string() << ", ret:" << bf.check_key(key);
+        return bf.check_key(key);
+    }
+    case OP_IN: {
+        FieldSet::const_iterator it = operand_set.begin();
+        for (; it != operand_set.end(); ++it) {
+            segment_v2::BloomKeyProbe key;
+            if ((*it)->is_string_type()) {
+                Slice* slice = (Slice*)((*it)->ptr());
+                key.init(*slice);
+            } else {
+                key.init({(*it)->ptr(), (*it)->size()});
+            }
+            LOG(INFO) << "op is IN, operand_field:" << (*it)->to_string() << ", ret:" << bf.check_key(key);
+            if (bf.check_key(key)) { return true; }
+        }
+        return false;
+    }
+    case OP_IS: {
+        // IS [NOT] NULL can only used in to filter IS NULL predicate.
+        if (operand_field->is_null()) {
+            segment_v2::BloomKeyProbe key(Slice((const char*)nullptr, 0));
+            return bf.check_key(key);
+        }
+    }
+    default:
+        break;
+    }
+
+    return true;
 }
 
 CondColumn::~CondColumn() {
@@ -547,6 +590,16 @@ bool CondColumn::eval(const BloomFilter& bf) const {
         }
     }
 
+    return true;
+}
+
+bool CondColumn::eval(const segment_v2::BloomFilter& bf) {
+    // filter all column's conditions with bloom filter
+    for (auto& each_cond : _conds) {
+        if (!each_cond->eval(bf)) {
+            return false;
+        }
+    }
     return true;
 }
 

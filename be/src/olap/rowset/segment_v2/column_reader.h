@@ -28,6 +28,7 @@
 #include "olap/rowset/segment_v2/ordinal_page_index.h" // for OrdinalPageIndexIterator
 #include "olap/rowset/segment_v2/column_zone_map.h" // for ColumnZoneMap
 #include "olap/rowset/segment_v2/row_ranges.h" // for RowRanges
+#include "olap/rowset/segment_v2/bloom_filter_page.h" // for RowRanges
 
 namespace doris {
 
@@ -79,12 +80,19 @@ public:
     const TypeInfo* type_info() const { return _type_info; }
 
     bool has_zone_map() { return _meta.has_zone_map_page(); }
+
+    bool has_bloom_filter() { return _meta.has_bloom_filter_page(); }
+    
     void get_row_ranges_by_zone_map(CondColumn* cond_column, RowRanges* row_ranges);
+
+    void get_row_ranges_by_bloom_filter(CondColumn* cond_column, RowRanges* row_ranges);
 
 private:
     Status _init_ordinal_index();
 
     Status _init_column_zone_map();
+
+    Status _init_column_bloom_filter_page();
 
     void _get_filtered_pages(CondColumn* cond_column, std::vector<uint32_t>* page_indexes);
 
@@ -108,6 +116,9 @@ private:
 
     // column zone map info
     std::unique_ptr<ColumnZoneMap> _column_zone_map;
+
+    // column bloom filter page
+    std::unique_ptr<BloomFilterPage> _column_bloom_filter_page;
 };
 
 // Base iterator to read one column data

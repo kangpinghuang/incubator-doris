@@ -29,7 +29,6 @@
 
 namespace doris {
 
-static const uint64_t DEFAULT_SEED = 104729;
 static const uint64_t BLOOM_FILTER_NULL_HASHCODE = 2862933555777941757ULL;
 
 struct BloomFilterIndexHeader {
