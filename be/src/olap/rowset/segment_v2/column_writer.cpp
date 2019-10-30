@@ -49,11 +49,13 @@ public:
     }
     Slice finish() {
         auto len = _rle_encoder.Flush();
-        return Slice(_bitmap_buf.data(), len);
+        return Slice(_bitmap_buf.release(), len);
     }
     void reset() {
         _offset = 0;
         _rle_encoder.Clear();
+        size_t capacity = _bitmap_buf.capacity();
+        _bitmap_buf.reserve(capacity);
     }
 
     uint64_t size() {
@@ -332,7 +334,7 @@ Status ColumnWriter::_finish_current_page() {
     _page_builder->reset();
     if (_is_nullable) {
         page->null_bitmap = _null_bitmap_builder->finish();
-        _null_bitmap_builder->release();
+        // _null_bitmap_builder->release();
         _null_bitmap_builder->reset();
     }
     // update last first rowid
