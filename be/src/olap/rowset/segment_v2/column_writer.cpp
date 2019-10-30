@@ -219,6 +219,7 @@ Status ColumnWriter::write_data() {
     if (_encoding_info->encoding() == DICT_ENCODING) {
         OwnedSlice dict_page;
         _page_builder->get_dictionary_page(&dict_page);
+        std::unique_ptr<char[]> data(dict_page.data);
         std::vector<Slice> origin_data;
         origin_data.push_back(dict_page.slice());
         RETURN_IF_ERROR(_write_physical_page(&origin_data, &_dict_page_pp));
