@@ -40,10 +40,12 @@ OLAPStatus Compaction::do_compaction() {
 
     // 1. prepare input and output parameters
     int64_t segments_num = 0;
+    bool has_delete_predicate = false;
     for (auto& rowset : _input_rowsets) {
         _input_rowsets_size += rowset->data_disk_size();
         _input_row_num += rowset->num_rows();
         segments_num += rowset->num_segments();
+        has_delete_predicate = has_delete_predicate || rowset->rowset_meta()->has_delete_predicate();
     }
     _output_version = Version(_input_rowsets.front()->start_version(), _input_rowsets.back()->end_version());
     _tablet->compute_version_hash_from_rowsets(_input_rowsets, &_output_version_hash);
@@ -53,29 +55,38 @@ OLAPStatus Compaction::do_compaction() {
 
     // 2. write merged rows to output rowset
     Merger::Statistics stats;
-    auto res = Merger::merge_rowsets(_tablet, compaction_type(), _input_rs_readers, _output_rs_writer.get(), &stats);
-    if (res != OLAP_SUCCESS) {
-        LOG(WARNING) << "fail to do " << compaction_name()
-                     << ". res=" << res
-                     << ", tablet=" << _tablet->full_name()
-                     << ", output_version=" << _output_version.first
-                     << "-" << _output_version.second;
-        return res;
-    }
+    {
+        OlapStopWatch build_watch;
+        auto res = Merger::merge_rowsets(_tablet, compaction_type(), _input_rs_readers,
+                                  _output_rs_writer.get(), &stats);
+        if (res != OLAP_SUCCESS) {
+            LOG(WARNING) << "fail to do " << compaction_name()
+                         << ". res=" << res
+                         << ", tablet=" << _tablet->full_name()
+                         << ", output_version=" << _output_version.first << "-"
+                         << _output_version.second;
+            return res;
+        }
 
-    _output_rowset = _output_rs_writer->build();
-    if (_output_rowset == nullptr) {
-        LOG(WARNING) << "rowset writer build failed. writer version:"
-                     << ", output_version=" << _output_version.first
-                     << "-" << _output_version.second;
-        return OLAP_ERR_MALLOC_ERROR;
-    }
+        _output_rowset = _output_rs_writer->build();
+        if (_output_rowset == nullptr) {
+            LOG(WARNING) << "rowset writer build failed. writer version:"
+                         << ", output_version=" << _output_version.first << "-"
+                         << _output_version.second;
+            return OLAP_ERR_MALLOC_ERROR;
+        }
 
-    // 3. check correctness
-    RETURN_NOT_OK(check_correctness(stats));
+        // 3. check correctness
+        RETURN_NOT_OK(check_correctness(stats));
+        LOG(INFO) << "compaction build time:" << build_watch.get_elapse_second() << " s.";
+    }
 
     // 4. modify rowsets in memory
-    RETURN_NOT_OK(modify_rowsets());
+    {
+        OlapStopWatch meta_watch;
+        RETURN_NOT_OK(modify_rowsets());
+        LOG(INFO) << "modify rowset time:" << meta_watch.get_elapse_second() << " s.";
+    }
 
     // 5. update last success compaction time
     int64_t now = UnixMillis();
@@ -90,6 +101,9 @@ OLAPStatus Compaction::do_compaction() {
               << ", output_version=" << _output_version.first
               << "-" << _output_version.second
               << ", segments=" << segments_num
+              << ", output segment:" << _output_rowset->num_segments()
+              << ", output segment size:" << _output_rowset->data_disk_size()
+              << ", has_delete_predicate:" << has_delete_predicate
               << ". elapsed time=" << watch.get_elapse_second() << "s.";
 
     return OLAP_SUCCESS;
