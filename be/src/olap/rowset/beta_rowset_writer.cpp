@@ -84,6 +84,7 @@ OLAPStatus BetaRowsetWriter::init(const RowsetWriterContext& rowset_writer_conte
 
 template<typename RowType>
 OLAPStatus BetaRowsetWriter::_add_row(const RowType& row) {
+    OlapStopWatch add_watch;
     if (PREDICT_FALSE(_segment_writer == nullptr)) {
         RETURN_NOT_OK(_create_segment_writer());
     }
@@ -98,6 +99,7 @@ OLAPStatus BetaRowsetWriter::_add_row(const RowType& row) {
         RETURN_NOT_OK(_flush_segment_writer());
     }
     _num_rows_written++;
+    _add_row_time += add_watch.get_elapse_second();
     return OLAP_SUCCESS;
 }
 
@@ -156,6 +158,7 @@ RowsetSharedPtr BetaRowsetWriter::build() {
         return nullptr;
     }
     _rowset_build = true;
+    LOG(INFO) << "rowset add time:" << _add_row_time << "s.";
     return rowset;
 }
 

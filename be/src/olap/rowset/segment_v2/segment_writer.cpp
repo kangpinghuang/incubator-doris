@@ -108,15 +108,18 @@ template Status SegmentWriter::append_row(const RowCursor& row);
 template Status SegmentWriter::append_row(const ContiguousRow& row);
 
 uint64_t SegmentWriter::estimate_segment_size() {
+    OlapStopWatch size_watch;
     uint64_t size = 8; //magic size
     for (auto& column_writer : _column_writers) {
         size += column_writer->estimate_buffer_size();
     }
     size += _index_builder->size();
+    _size_time += size_watch.get_elapse_second();
     return size;
 }
 
 Status SegmentWriter::finalize(uint64_t* segment_file_size, uint64_t* index_size) {
+    OlapStopWatch finalize_watch;
     for (auto& column_writer : _column_writers) {
         RETURN_IF_ERROR(column_writer->finish());
     }
@@ -129,7 +132,9 @@ Status SegmentWriter::finalize(uint64_t* segment_file_size, uint64_t* index_size
     RETURN_IF_ERROR(_write_short_key_index());
     *index_size = _output_file->size() - index_offset;
     RETURN_IF_ERROR(_write_footer());
+    LOG(INFO) << "segment finalize time:" << finalize_watch.get_elapse_second() << "s.";
     *segment_file_size = _output_file->size();
+    LOG(INFO) << "size estimate time:" << _size_time;
     return Status::OK();
 }
 

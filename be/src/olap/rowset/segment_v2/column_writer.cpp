@@ -208,14 +208,7 @@ Status ColumnWriter::append_nullable(
 }
 
 uint64_t ColumnWriter::estimate_buffer_size() {
-    uint64_t size = 0;
-    Page* page = _pages.head;
-    while (page != nullptr) {
-        for (auto& data_slice : page->data) {
-            size += data_slice.slice().size;
-        }
-        page = page->next;
-    }
+    uint64_t size = _data_size;
     size += _page_builder->size();
     if (_is_nullable) {
         size += _null_bitmap_builder->size();
@@ -234,6 +227,7 @@ uint64_t ColumnWriter::estimate_buffer_size() {
 }
 
 Status ColumnWriter::finish() {
+    LOG(INFO) << "page size:" << _page_num << ", data size:" << _data_size;
     return _finish_current_page();
 }
 

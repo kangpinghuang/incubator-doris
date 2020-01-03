@@ -81,6 +81,7 @@ private:
 
     bool _is_pending = false;
     bool _rowset_build = false;
+    double _add_row_time = 0;
 };
 
 } // namespace doris

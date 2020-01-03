@@ -50,6 +50,7 @@ OLAPStatus Merger::merge_rowsets(TabletSharedPtr tablet,
 
     // The following procedure would last for long time, half of one day, etc.
     int64_t output_rows = 0;
+    OlapStopWatch convert_watch;
     while (true) {
         ObjectPool objectPool;
         bool eof = false;
@@ -66,6 +67,7 @@ OLAPStatus Merger::merge_rowsets(TabletSharedPtr tablet,
         // so we should release memory immediately
         mem_pool->clear();
     }
+    LOG(INFO) << "convert time:" << convert_watch.get_elapse_second() << " s.";
 
     if (stats_output != nullptr) {
         stats_output->output_rows = output_rows;
@@ -73,8 +75,10 @@ OLAPStatus Merger::merge_rowsets(TabletSharedPtr tablet,
         stats_output->filtered_rows = reader.filtered_rows();
     }
 
+    OlapStopWatch flush_watch;
     RETURN_NOT_OK_LOG(dst_rowset_writer->flush(),
                  "failed to flush rowset when merging rowsets of tablet " + tablet->full_name());
+    LOG(INFO) << "merger flush time:" << flush_watch.get_elapse_second() << " s.";
     return OLAP_SUCCESS;
 }
 

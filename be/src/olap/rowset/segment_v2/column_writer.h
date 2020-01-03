@@ -132,6 +132,10 @@ private:
         if (_pages.head == nullptr) {
             _pages.head = page;
         }
+        for (auto& data_slice : page->data) {
+            _data_size += data_slice.slice().size;
+        }
+        ++_page_num;
     }
 
     Status _append_data(const uint8_t** ptr, size_t num_rows);
@@ -169,6 +173,8 @@ private:
     PagePointer _zone_map_pp;
     PagePointer _dict_page_pp;
     uint64_t _written_size = 0;
+    uint64_t _data_size = 0;
+    size_t _page_num = 0;
 };
 
 

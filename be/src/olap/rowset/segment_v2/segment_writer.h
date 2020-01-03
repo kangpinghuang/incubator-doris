@@ -97,6 +97,7 @@ private:
     std::unique_ptr<WritableFile> _output_file;
     std::vector<std::unique_ptr<ColumnWriter>> _column_writers;
     uint32_t _row_count = 0;
+    double _size_time = 0;
 };
 
 }

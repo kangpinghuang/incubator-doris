@@ -56,9 +56,10 @@ OLAPStatus Compaction::do_compaction() {
     // 2. write merged rows to output rowset
     Merger::Statistics stats;
     {
-        OlapStopWatch build_watch;
+        OlapStopWatch merge_watch;
         auto res = Merger::merge_rowsets(_tablet, compaction_type(), _input_rs_readers,
                                   _output_rs_writer.get(), &stats);
+        LOG(INFO) << "merge time:" << merge_watch.get_elapse_second() << " s.";
         if (res != OLAP_SUCCESS) {
             LOG(WARNING) << "fail to do " << compaction_name()
                          << ". res=" << res
@@ -68,7 +69,9 @@ OLAPStatus Compaction::do_compaction() {
             return res;
         }
 
+        OlapStopWatch build_watch;
         _output_rowset = _output_rs_writer->build();
+        LOG(INFO) << "rowset build time:" << build_watch.get_elapse_second() << " s.";
         if (_output_rowset == nullptr) {
             LOG(WARNING) << "rowset writer build failed. writer version:"
                          << ", output_version=" << _output_version.first << "-"
@@ -77,8 +80,9 @@ OLAPStatus Compaction::do_compaction() {
         }
 
         // 3. check correctness
+        OlapStopWatch check_watch;
         RETURN_NOT_OK(check_correctness(stats));
-        LOG(INFO) << "compaction build time:" << build_watch.get_elapse_second() << " s.";
+        LOG(INFO) << "check time:" << check_watch.get_elapse_second() << " s.";
     }
 
     // 4. modify rowsets in memory
