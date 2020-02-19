@@ -48,7 +48,9 @@ public:
 
     virtual bool eof() = 0;
 
-    // 返回当前块剩余可读字节数
+    // return the remaining bytes
+    // it is the same like remain()
+    // keep it just for compatible
     virtual uint64_t available() = 0;
 
     virtual size_t get_buffer_size() = 0;
