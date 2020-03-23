@@ -48,8 +48,8 @@ public class PartitionInfo implements Serializable {
         @SerializedName("is_max_partition")
         public boolean isMaxPartition;
 
-        @SerializedName("buckets_num")
-        public int bucketsNum;
+        @SerializedName("bucket_num")
+        public int bucketNum;
     }
 
     @SerializedName("partitions")

@@ -40,10 +40,29 @@ enum IndexType {
     UNIQUE
 }
 
+enum ColumnType {
+    BOOL,
+    TINYINT,
+    SMALLINT,
+    INT,
+    BIGINT,
+    LARGEINT,
+    FLOAT,
+    DOUBLE,
+    DECIMAL,
+    DATETIME,
+    DATE,
+    CHAR,
+    VARCHAR,
+    HLL,
+    OBJECT,
+    BITMAP
+}
+
 class IndexMetaColumnComparator implements Comparator<IndexMeta> {
     @Override
     public int compare(IndexMeta a, IndexMeta b) {
-        int diff = a.columnDescriptions.size() - b.columnDescriptions.size();
+        int diff = a.columns.size() - b.columns.size();
         if (diff == 0) {
             return 0;
         } else if (diff > 0) {
@@ -55,18 +74,31 @@ class IndexMetaColumnComparator implements Comparator<IndexMeta> {
 }
 
 public class IndexMeta implements Serializable{
-    class IndexColumnDescription implements Serializable{
-        public String name;
+    class ColumnDescription implements Serializable{
+        @SerializedName("column_name")
+        public String columnName;
+
+        @SerializedName("column_type")
+        public ColumnType columnType;
+
+        @SerializedName("string_length")
+        public int stringLength;
 
         @SerializedName("is_key")
         public boolean isKey;
 
+        @SerializedName("is_allow_null")
+        public boolean isAllowNull;
+
         @SerializedName("aggregation_type")
         public AggregationType aggregationType;
+
+        @SerializedName("default_value")
+        public String defaultValue;
     }
 
-    @SerializedName("column_descriptions")
-    public List<IndexColumnDescription> columnDescriptions;
+    @SerializedName("columns")
+    public List<ColumnDescription> columns;
 
     @SerializedName("index_id")
     public int indexId;
@@ -76,6 +108,9 @@ public class IndexMeta implements Serializable{
 
     @SerializedName("index_type")
     public IndexType indexType;
+
+    @SerializedName("is_base_index")
+    public boolean isBaseIndex;
 
     public String toString() {
         return "index_id:" + indexId;

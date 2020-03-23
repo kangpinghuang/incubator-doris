@@ -23,14 +23,12 @@ import java.io.Serializable;
 import java.util.List;
 
 public class TableMeta implements Serializable {
-    @SerializedName("base_index")
-    public int baseIndex;
-
-    public List<ColumnMeta> columns;
+    //public List<ColumnMeta> columns;
     public List<IndexMeta> indexes;
 
     @SerializedName("partition_info")
     public PartitionInfo partitionInfo;
 
-    public List<SourceDescription> sources;
+    @SerializedName("file_groups")
+    public List<FileGroup> fileGroups;
 }

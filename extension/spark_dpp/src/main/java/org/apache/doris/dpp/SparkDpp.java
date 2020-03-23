@@ -39,6 +39,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.BufferedWriter;
+import java.io.File;
 import java.io.OutputStreamWriter;
 import java.net.URI;
 import java.nio.ByteBuffer;
@@ -167,19 +168,19 @@ public final class SparkDpp implements java.io.Serializable {
         return buffer;
     }
 
-    private StructType createDstTableSchema(List<ColumnMeta> columns, boolean addBucketIdColumn) {
+    private StructType createDstTableSchema(List<IndexMeta.ColumnDescription> columns, boolean addBucketIdColumn) {
         List<StructField> fields = new ArrayList<>();
         if (addBucketIdColumn) {
             StructField bucketIdField = DataTypes.createStructField(BUCKET_ID, DataTypes.StringType, true);
             fields.add(bucketIdField);
         }
-        for (ColumnMeta columnMeta : columns) {
+        for (IndexMeta.ColumnDescription columnDescription : columns) {
             // user StringType to load source data
             // TODO: process null "\N"
-            String columnName = columnMeta.columnName;
-            ColumnType columnType = columnMeta.columnType;
+            String columnName = columnDescription.columnName;
+            ColumnType columnType = columnDescription.columnType;
             DataType structColumnType = columnTypeToDataType(columnType);
-            StructField field = DataTypes.createStructField(columnName, structColumnType, columnMeta.isAllowNull);
+            StructField field = DataTypes.createStructField(columnName, structColumnType, columnDescription.isAllowNull);
             fields.add(field);
         }
         StructType dstSchema = DataTypes.createStructType(fields);
@@ -192,32 +193,32 @@ public final class SparkDpp implements java.io.Serializable {
         keyColumns.add(new Column(BUCKET_ID));
         Map<String, String> aggFieldOperations = new HashMap<>();
         Map<String, String> renameMap = new HashMap<>();
-        for (IndexMeta.IndexColumnDescription columnDescription : indexMeta.columnDescriptions) {
+        for (IndexMeta.ColumnDescription columnDescription : indexMeta.columns) {
             if (columnDescription.isKey) {
-                keyColumns.add(new Column(columnDescription.name));
+                keyColumns.add(new Column(columnDescription.columnName));
                 continue;
             }
             if (columnDescription.aggregationType == AggregationType.MAX) {
-                aggFieldOperations.put(columnDescription.name, "max");
-                renameMap.put(columnDescription.name, "max(" + columnDescription.name + ")");
+                aggFieldOperations.put(columnDescription.columnName, "max");
+                renameMap.put(columnDescription.columnName, "max(" + columnDescription.columnName + ")");
             } else if (columnDescription.aggregationType == AggregationType.MIN) {
-                aggFieldOperations.put(columnDescription.name, "min");
-                renameMap.put(columnDescription.name, "min(" + columnDescription.name + ")");
+                aggFieldOperations.put(columnDescription.columnName, "min");
+                renameMap.put(columnDescription.columnName, "min(" + columnDescription.columnName + ")");
             } else if (columnDescription.aggregationType == AggregationType.SUM) {
-                aggFieldOperations.put(columnDescription.name, "sum");
-                renameMap.put(columnDescription.name, "sum(" + columnDescription.name + ")");
+                aggFieldOperations.put(columnDescription.columnName, "sum");
+                renameMap.put(columnDescription.columnName, "sum(" + columnDescription.columnName + ")");
             } else if (columnDescription.aggregationType == AggregationType.HLL_UNION) {
-                aggFieldOperations.put(columnDescription.name, "hll_union");
-                renameMap.put(columnDescription.name, "hll_union(" + columnDescription.name + ")");
+                aggFieldOperations.put(columnDescription.columnName, "hll_union");
+                renameMap.put(columnDescription.columnName, "hll_union(" + columnDescription.columnName + ")");
             } else if (columnDescription.aggregationType == AggregationType.BITMAP_UNION) {
-                aggFieldOperations.put(columnDescription.name, "bitmap_union");
-                renameMap.put(columnDescription.name, "bitmap_union(" + columnDescription.name + ")");
+                aggFieldOperations.put(columnDescription.columnName, "bitmap_union");
+                renameMap.put(columnDescription.columnName, "bitmap_union(" + columnDescription.columnName + ")");
             } else if (columnDescription.aggregationType == AggregationType.REPLACE) {
-                aggFieldOperations.put(columnDescription.name, "replace");
-                renameMap.put(columnDescription.name, "replace(" + columnDescription.name + ")");
+                aggFieldOperations.put(columnDescription.columnName, "replace");
+                renameMap.put(columnDescription.columnName, "replace(" + columnDescription.columnName + ")");
             } else if (columnDescription.aggregationType == AggregationType.REPLACE_IF_NOT_NULL) {
-                aggFieldOperations.put(columnDescription.name, "replace_if_not_null");
-                renameMap.put(columnDescription.name, "replace_if_not_null(" + columnDescription.name + ")");
+                aggFieldOperations.put(columnDescription.columnName, "replace_if_not_null");
+                renameMap.put(columnDescription.columnName, "replace_if_not_null(" + columnDescription.columnName + ")");
             } else {
                 System.out.println("INVALID aggregation type:" + columnDescription.aggregationType);
             }
@@ -298,7 +299,6 @@ public final class SparkDpp implements java.io.Serializable {
         Map<Integer, Dataset<Row>> parentDataframeMap = new HashMap<>();
         parentDataframeMap.put(baseIndex.indexId, rootDataframe);
         Map<Integer, Dataset<Row>> childrenDataframeMap = new HashMap<>();
-        String pathPrefix = jobConf.output_path + "/" + jobLabel() + "/" + System.currentTimeMillis();
         String pathPattern = jobConf.output_path + "/" + jobConf.output_file_pattern;
         while (!nodeQueue.isEmpty()) {
             RollupTreeNode curNode = nodeQueue.poll();
@@ -316,7 +316,8 @@ public final class SparkDpp implements java.io.Serializable {
                 parentDataframeMap = childrenDataframeMap;
                 childrenDataframeMap = new HashMap<>();
             }
-            int parentIndexId = tableMeta.baseIndex;
+            // TODO: check here
+            int parentIndexId = baseIndex.indexId;
             if (curNode.parent != null) {
                 parentIndexId = curNode.parent.indexId;
             }
@@ -373,7 +374,7 @@ public final class SparkDpp implements java.io.Serializable {
                                                         List<String> keyColumnNames,
                                                         List<String> valueColumnNames,
                                                         StructType dstTableSchema,
-                                                        TableMeta tableMeta) {
+                                                        IndexMeta baseIndex) {
         List<String> distributeColumns = partitionInfo.distributionColumnRefs;
         Partitioner partitioner = new DorisRangePartitioner(partitionInfo, partitionKeyIndex, partitionRangeKeys);
 
@@ -403,8 +404,10 @@ public final class SparkDpp implements java.io.Serializable {
                 if (pid < 0) {
                     // TODO: add log for invalid partition id
                 }
+                System.out.println("partitionInfo.partitions:" + partitionInfo.partitions + ", pid:" + pid);
                 long hashValue = getHashValue(row, distributeColumns, dstTableSchema);
-                int bucketId = (int) ((hashValue & 0xffffffff) % partitionInfo.partitions.get(pid).bucketsNum);
+                System.out.println("partitionInfo.partitions.get(pid).bucketsNum:" + partitionInfo.partitions.get(pid).bucketNum + ", hashValue:" + hashValue);
+                int bucketId = (int) ((hashValue & 0xffffffff) % partitionInfo.partitions.get(pid).bucketNum);
                 int partitionId = partitionInfo.partitions.get(pid).partitionId;
                 // bucketKey is partitionId_bucketId
                 String bucketKey = Integer.toString(partitionId) + "_" + Integer.toString(bucketId);
@@ -422,7 +425,7 @@ public final class SparkDpp implements java.io.Serializable {
                 }
         );
 
-        StructType midTableSchema = createDstTableSchema(tableMeta.columns, true);
+        StructType midTableSchema = createDstTableSchema(baseIndex.columns, true);
         dataframe = spark.createDataFrame(resultRdd, midTableSchema);
         dataframe = dataframe.repartition(partitionInfo.partitions.size(), new Column(BUCKET_ID));
         return dataframe;
@@ -446,14 +449,14 @@ public final class SparkDpp implements java.io.Serializable {
     }
 
     private Dataset<Row> loadDataFromPath(SparkSession spark,
-                                          SourceDescription source,
+                                          FileGroup fileGroup,
                                           String fileUrl,
                                           StructType srcSchema,
                                           List<String> dataSrcColumns) {
         JavaRDD<String> sourceDataRdd = spark.read().textFile(fileUrl).toJavaRDD();
         JavaRDD<Row> rowRDD = sourceDataRdd.map((Function<String, Row>) record -> {
             // TODO: process null value
-            String[] attributes = record.split(source.columnSeparator);
+            String[] attributes = record.split(fileGroup.columnSeparator);
             if (attributes.length != dataSrcColumns.size()) {
                 // update invalid row counter statistics
                 // this counter will be record in result.json
@@ -482,6 +485,7 @@ public final class SparkDpp implements java.io.Serializable {
             List<Object> keys = new ArrayList<>();
             for (Short value : partitionDescription.startKeys) {
                 keys.add(value);
+                System.out.println("add partition:" + value);
             }
             partitionRangeKeys.add(new DppColumns(keys, partitionKeySchema));
             if (partitionDescription.isMaxPartition) {
@@ -489,12 +493,14 @@ public final class SparkDpp implements java.io.Serializable {
                 //List<Class> endKeysClasses = new ArrayList<>();
                 for (Short value : partitionDescription.endKeys) {
                     endKeys.add(value);
+                    System.out.println("add partition:" + value);
                 }
                 partitionRangeKeys.add(new DppColumns(endKeys, partitionKeySchema));
             }
         }
         // sort the partition range keys to make sure it is asc order
         Collections.sort(partitionRangeKeys);
+        System.out.println("partitionRangeKeys:" + partitionRangeKeys);
         return partitionRangeKeys;
     }
 
@@ -508,24 +514,24 @@ public final class SparkDpp implements java.io.Serializable {
         for (Map.Entry<Integer, TableMeta> entry : jobConf.tables.entrySet()) {
             Integer tableId = entry.getKey();
             TableMeta tableMeta = entry.getValue();
-            StructType dstTableSchema = createDstTableSchema(tableMeta.columns, false);
 
             // get the base index meta
             IndexMeta baseIndex = null;
             for (IndexMeta indexMeta : tableMeta.indexes) {
-                if (indexMeta.indexId == tableMeta.baseIndex) {
+                if (indexMeta.isBaseIndex) {
                     baseIndex = indexMeta;
                     break;
                 }
             }
+
             // get key column names and value column names seperately
             List<String> keyColumnNames = new ArrayList<>();
             List<String> valueColumnNames = new ArrayList<>();
-            for (IndexMeta.IndexColumnDescription indexColumnDescription : baseIndex.columnDescriptions) {
+            for (IndexMeta.ColumnDescription indexColumnDescription : baseIndex.columns) {
                 if (indexColumnDescription.isKey) {
-                    keyColumnNames.add(indexColumnDescription.name);
+                    keyColumnNames.add(indexColumnDescription.columnName);
                 } else {
-                    valueColumnNames.add(indexColumnDescription.name);
+                    valueColumnNames.add(indexColumnDescription.columnName);
                 }
             }
 
@@ -533,41 +539,43 @@ public final class SparkDpp implements java.io.Serializable {
             List<Integer> partitionKeyIndex = new ArrayList<Integer>();
             List<Class> partitionKeySchema = new ArrayList<>();
             for (String key : partitionInfo.partitionColumnNames) {
-                for (ColumnMeta columnMeta : tableMeta.columns) {
-                    if (columnMeta.columnName.equals(key)) {
-                        partitionKeyIndex.add(columnMeta.columnId);
-                        partitionKeySchema.add(dataTypeToClass(columnTypeToDataType(columnMeta.columnType)));
+                for (int i = 0; i < baseIndex.columns.size(); ++i) {
+                    IndexMeta.ColumnDescription columnDescription = baseIndex.columns.get(i);
+                    if (columnDescription.columnName.equals(key)) {
+                        partitionKeyIndex.add(i);
+                        partitionKeySchema.add(dataTypeToClass(columnTypeToDataType(columnDescription.columnType)));
                         break;
                     }
                 }
             }
             List<DppColumns> partitionRangeKeys = createPartitionRangeKeys(partitionInfo, partitionKeySchema);
-
+            LOG.info("partitionRangeKeys:" + partitionRangeKeys);
+            StructType dstTableSchema = createDstTableSchema(baseIndex.columns, false);
             RollupTreeBuilder rollupTreeParser = new MinimalCoverRollupTreeBuilder();
             RollupTreeNode rootNode = rollupTreeParser.build(tableMeta);
 
-            for (SourceDescription source : tableMeta.sources) {
+            for (FileGroup fileGroup : tableMeta.fileGroups) {
                 // TODO: process the case the user do not provide the source schema
-                List<String> dataSrcColumns = source.columns;
+                List<String> dataSrcColumns = fileGroup.columns;
                 StructType srcSchema = createScrSchema(dataSrcColumns);
-                List<String> fileUrls = source.fileUrls;
-                for (String fileUrl : fileUrls) {
-                    if (source.columnSeparator == null) {
+                List<String> filePaths = fileGroup.filePaths;
+                for (String filePath : filePaths) {
+                    if (fileGroup.columnSeparator == null) {
                         System.out.println("invalid null column separator!");
                         System.exit(-1);
                     }
-                    Dataset<Row> dataframe = loadDataFromPath(spark, source, fileUrl, srcSchema, dataSrcColumns);
+                    Dataset<Row> dataframe = loadDataFromPath(spark, fileGroup, filePath, srcSchema, dataSrcColumns);
                     dataframe = convertSrcDataframeToDstDataframe(dataframe, srcSchema,dstTableSchema);
 
-                    if (!source.where.isEmpty()) {
-                        dataframe = dataframe.filter(source.where);
+                    if (!fileGroup.where.isEmpty()) {
+                        dataframe = dataframe.filter(fileGroup.where);
                     }
 
                     dataframe = repartitionDataframeByBucketId(spark, dataframe,
                             partitionInfo, partitionKeyIndex,
                             partitionKeySchema, partitionRangeKeys,
                             keyColumnNames, valueColumnNames,
-                            dstTableSchema, tableMeta);
+                            dstTableSchema, baseIndex);
 
                     processRollupTree(rootNode, dataframe, tableId, tableMeta, baseIndex);
                 }

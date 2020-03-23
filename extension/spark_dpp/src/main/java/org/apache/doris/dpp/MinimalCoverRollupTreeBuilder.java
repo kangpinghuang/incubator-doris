@@ -25,33 +25,33 @@ import java.util.Map;
 // Build RollupTree by using minimal cover strategy
 public class MinimalCoverRollupTreeBuilder implements RollupTreeBuilder {
     public RollupTreeNode build(TableMeta tableMeta) {
-        List<ColumnMeta> columns = tableMeta.columns;
         List<IndexMeta> indexes = tableMeta.indexes;
+        List<IndexMeta> indexMetas = new ArrayList<>();
+        IndexMeta baseIndex = null;
+        for (IndexMeta indexMeta : indexes) {
+            if (indexMeta.isBaseIndex) {
+                baseIndex = indexMeta;
+                continue;
+            }
+            indexMetas.add(indexMeta);
+        }
+        List<IndexMeta.ColumnDescription> baseIndexColumns = baseIndex.columns;
         List<String> baseKeyColumns = new ArrayList<>();
         List<String> baseValueColumns = new ArrayList<>();
-        for (ColumnMeta columnMeta : columns) {
+        for (IndexMeta.ColumnDescription columnMeta : baseIndexColumns) {
             if (columnMeta.isKey) {
                 baseKeyColumns.add(columnMeta.columnName);
             } else {
                 baseValueColumns.add(columnMeta.columnName);
             }
-
         }
         RollupTreeNode root = new RollupTreeNode();
         root.parent = null;
         root.keyColumnNames = baseKeyColumns;
         root.valueColumnNames = baseValueColumns;
-        root.indexId = tableMeta.baseIndex;
+        root.indexId = baseIndex.indexId;
+        root.indexMeta = baseIndex;
 
-        // post order traverse the tree
-        List<IndexMeta> indexMetas = new ArrayList<>();
-        for (IndexMeta indexMeta : indexes) {
-            if (indexMeta.indexId == tableMeta.baseIndex) {
-                root.indexMeta = indexMeta;
-                continue;
-            }
-            indexMetas.add(indexMeta);
-        }
         System.err.println("before sorted index metas:" + indexMetas);
         // sort the index metas to make sure the column number decrease
         Collections.sort(indexMetas, new IndexMetaColumnComparator().reversed());
@@ -63,11 +63,11 @@ public class MinimalCoverRollupTreeBuilder implements RollupTreeBuilder {
         for (int i = 0; i < indexMetas.size(); ++i) {
             List<String> keyColumns = new ArrayList<>();
             List<String> valueColumns = new ArrayList<>();
-            for (IndexMeta.IndexColumnDescription columnDescription : indexMetas.get(i).columnDescriptions) {
+            for (IndexMeta.ColumnDescription columnDescription : indexMetas.get(i).columns) {
                 if (columnDescription.isKey) {
-                    keyColumns.add(columnDescription.name);
+                    keyColumns.add(columnDescription.columnName);
                 } else {
-                    valueColumns.add(columnDescription.name);
+                    valueColumns.add(columnDescription.columnName);
                 }
             }
             insertIndex(root, indexMetas.get(i), keyColumns, valueColumns, i, flags);
