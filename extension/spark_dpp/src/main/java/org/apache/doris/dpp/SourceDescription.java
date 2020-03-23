@@ -31,8 +31,8 @@ public class SourceDescription implements Serializable {
 
     public List<String> columns;
 
-    @SerializedName("column_seperator")
-    public String columnSeperator;
+    @SerializedName("column_separator")
+    public String columnSeparator;
 
     @SerializedName("columns_from_path")
     public List<String> columnsFromPath;

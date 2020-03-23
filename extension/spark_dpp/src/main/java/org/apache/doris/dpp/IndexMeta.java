@@ -72,7 +72,7 @@ public class IndexMeta implements Serializable{
     public int indexId;
 
     @SerializedName("schema_hash")
-    public String schemaHash;
+    public int schemaHash;
 
     @SerializedName("index_type")
     public IndexType indexType;

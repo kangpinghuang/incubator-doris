@@ -22,7 +22,6 @@ import com.google.gson.JsonSyntaxException;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.spark.Partitioner;
-import org.apache.spark.api.java.function.MapFunction;
 import org.apache.spark.sql.*;
 import org.apache.spark.sql.types.DataType;
 import org.apache.spark.sql.types.DataTypes;
@@ -73,7 +72,7 @@ public final class SparkDpp implements java.io.Serializable {
         try {
             jobConf = gson.fromJson(jsonConf, JobConf.class);
         } catch (JsonSyntaxException jsonException) {
-            System.err.println("Parse job config failed, error:" + jsonException.toString());
+            System.out.println("Parse job config failed, error:" + jsonException.toString());
             return false;
         }
         return true;
@@ -142,7 +141,7 @@ public final class SparkDpp implements java.io.Serializable {
                 structColumnType = DataTypes.StringType;
                 break;
             default:
-                System.err.println("invalid column type:" + columnType);
+                System.out.println("invalid column type:" + columnType);
                 break;
         }
         return structColumnType;
@@ -178,7 +177,6 @@ public final class SparkDpp implements java.io.Serializable {
             // user StringType to load source data
             // TODO: process null "\N"
             String columnName = columnMeta.columnName;
-            System.err.println("column name:" + columnName);
             ColumnType columnType = columnMeta.columnType;
             DataType structColumnType = columnTypeToDataType(columnType);
             StructField field = DataTypes.createStructField(columnName, structColumnType, columnMeta.isAllowNull);
@@ -190,6 +188,7 @@ public final class SparkDpp implements java.io.Serializable {
 
     private Dataset<Row> processDataframeAgg(Dataset<Row> dataframe, IndexMeta indexMeta) {
         List<Column> keyColumns = new ArrayList<>();
+        // add BUCKET_ID as a Key
         keyColumns.add(new Column(BUCKET_ID));
         Map<String, String> aggFieldOperations = new HashMap<>();
         Map<String, String> renameMap = new HashMap<>();
@@ -220,7 +219,7 @@ public final class SparkDpp implements java.io.Serializable {
                 aggFieldOperations.put(columnDescription.name, "replace_if_not_null");
                 renameMap.put(columnDescription.name, "replace_if_not_null(" + columnDescription.name + ")");
             } else {
-                System.err.println("INVALID aggregation type:" + columnDescription.aggregationType);
+                System.out.println("INVALID aggregation type:" + columnDescription.aggregationType);
             }
         }
         Seq<Column> keyColumnSeq = JavaConverters.asScalaIteratorConverter(keyColumns.iterator()).asScala().toSeq();
@@ -234,7 +233,8 @@ public final class SparkDpp implements java.io.Serializable {
     // The dataframe is partitioned by bucketKey, and sorted by bucketKey and key columns.
     // This function will write each bucket data to file within partition
     // Should extend this logic for different output format
-    private void writePartitionedAndSortedDataframeToFile(Dataset<Row> dataframe, String pathPrefix, int curIndexId) {
+    private void writePartitionedAndSortedDataframeToFile(Dataset<Row> dataframe, String pathPattern,
+                                                          int tableId, int curIndexId, int schemaHash) {
         dataframe.foreachPartition(new ForeachPartitionFunction<Row>() {
             @Override
             public void call(Iterator<Row> t) throws Exception {
@@ -246,7 +246,7 @@ public final class SparkDpp implements java.io.Serializable {
                 while (t.hasNext()) {
                     Row row = t.next();
                     if (row.length() <= 1) {
-                        System.err.println("invalid row:" + row);
+                        System.out.println("invalid row:" + row);
                         continue;
                     }
                     String curBucketKey = row.getString(0);
@@ -260,17 +260,23 @@ public final class SparkDpp implements java.io.Serializable {
                         // ok, use ',' as seperator
                         sb.append(",");
                     }
-                    if (lastBucketKey == null && !curBucketKey.equals(lastBucketKey)) {
+                    if (lastBucketKey == null || !curBucketKey.equals(lastBucketKey)) {
                         if (writer != null) {
-                            System.err.println("close writer");
+                            System.out.println("close writer");
                             writer.close();
                         }
                         // flush current writer and create a new writer
-                        String path = pathPrefix + "/" + curIndexId + "_" + curBucketKey;
+                        String[] bucketKey = curBucketKey.split("_");
+                        if (bucketKey.length != 2) {
+                            System.out.println("invalid bucket key:" + curBucketKey);
+                            continue;
+                        }
+                        int partitionId = Integer.parseInt(bucketKey[0]);
+                        int bucketId = Integer.parseInt(bucketKey[1]);
+                        String path = String.format(pathPattern, tableId, partitionId, curIndexId, bucketId, schemaHash);
                         writer = new BufferedWriter(new OutputStreamWriter(fs.create(new Path(path))));
-                        System.err.println("new writer for path:" + path);
                         if(writer != null){
-                            System.err.println("[HdfsOperate]>> initialize writer succeed! path:" + path);
+                            System.out.println("[HdfsOperate]>> initialize writer succeed! path:" + path);
                         }
                         lastBucketKey = curBucketKey;
                     }
@@ -283,7 +289,8 @@ public final class SparkDpp implements java.io.Serializable {
         });
     }
 
-    private void processRollupTree(RollupTreeNode rootNode, Dataset<Row> rootDataframe, TableMeta tableMeta, IndexMeta baseIndex) {
+    private void processRollupTree(RollupTreeNode rootNode,
+                                   Dataset<Row> rootDataframe, int tableId, TableMeta tableMeta, IndexMeta baseIndex) {
         Queue<RollupTreeNode> nodeQueue = new LinkedList<>();
         nodeQueue.offer(rootNode);
         int currentLevel = 0;
@@ -292,6 +299,7 @@ public final class SparkDpp implements java.io.Serializable {
         parentDataframeMap.put(baseIndex.indexId, rootDataframe);
         Map<Integer, Dataset<Row>> childrenDataframeMap = new HashMap<>();
         String pathPrefix = jobConf.output_path + "/" + jobLabel() + "/" + System.currentTimeMillis();
+        String pathPattern = jobConf.output_path + "/" + jobConf.output_file_pattern;
         while (!nodeQueue.isEmpty()) {
             RollupTreeNode curNode = nodeQueue.poll();
             if (curNode.children != null) {
@@ -327,8 +335,6 @@ public final class SparkDpp implements java.io.Serializable {
                 columns.add(new Column(valueName));
             }
             Seq<Column> columnSeq = JavaConverters.asScalaIteratorConverter(columns.iterator()).asScala().toSeq();
-            System.out.println("319, cur node id:" + curNode.indexId + ", parent id:" + parentIndexId);
-            parentDataframe.show();
             curDataFrame = parentDataframe.select(columnSeq);
 
             if (curNode.indexMeta.indexType == IndexType.AGGREGATE) {
@@ -346,69 +352,8 @@ public final class SparkDpp implements java.io.Serializable {
                 curDataFrame.persist();
             }
             int curIndexId = curNode.indexId;
-            System.out.println("336, curNode index:" + curIndexId);
-            curDataFrame.show();
-            System.out.println("338, curNode path prefix:" + pathPrefix);
-            writePartitionedAndSortedDataframeToFile(curDataFrame, pathPrefix, curIndexId);
+            writePartitionedAndSortedDataframeToFile(curDataFrame, pathPattern, tableId, curIndexId, curNode.indexMeta.schemaHash);
         }
-    }
-
-    private int processRollupTreeNode(RollupTreeNode curNode, int currentLevel,
-                                       TableMeta tableMeta, String pathPrefix,
-                                       Map<Integer, Dataset<Row>> parentDataframeMap,
-                                       Map<Integer, Dataset<Row>> childrenDataframeMap) {
-        Dataset<Row> curDataFrame = null;
-        // column select for rollup
-        if (curNode.level != currentLevel) {
-            // need to unpersist parent dataframe
-            currentLevel = curNode.level;
-            parentDataframeMap.clear();
-            parentDataframeMap = childrenDataframeMap;
-            childrenDataframeMap = new HashMap<>();
-        }
-        int parentIndexId = tableMeta.baseIndex;
-        if (curNode.parent != null) {
-            parentIndexId = curNode.parent.indexId;
-        }
-
-        Dataset<Row> parentDataframe = parentDataframeMap.get(parentIndexId);
-        List<Column> columns = new ArrayList<>();
-        List<Column> keyColumns = new ArrayList<>();
-        Column bucketIdColumn = new Column(BUCKET_ID);
-        keyColumns.add(bucketIdColumn);
-        columns.add(bucketIdColumn);
-        for (String keyName : curNode.keyColumnNames) {
-            columns.add(new Column(keyName));
-            keyColumns.add(new Column(keyName));
-        }
-        for (String valueName : curNode.valueColumnNames) {
-            columns.add(new Column(valueName));
-        }
-        Seq<Column> columnSeq = JavaConverters.asScalaIteratorConverter(columns.iterator()).asScala().toSeq();
-        System.out.println("319, cur node id:" + curNode.indexId + ", parent id:" + parentIndexId);
-        parentDataframe.show();
-        curDataFrame = parentDataframe.select(columnSeq);
-
-        if (curNode.indexMeta.indexType == IndexType.AGGREGATE) {
-            // do aggregation
-            curDataFrame = processDataframeAgg(curDataFrame, curNode.indexMeta);
-        }
-        Seq<Column> keyColumnSeq = JavaConverters.asScalaIteratorConverter(keyColumns.iterator()).asScala().toSeq();
-        // should use sortWithinPartitions, not sort
-        // because sort will modify the partition number which will lead to bug
-        curDataFrame = curDataFrame.sortWithinPartitions(keyColumnSeq);
-        childrenDataframeMap.put(curNode.indexId, curDataFrame);
-
-        if (curNode.children != null && curNode.children.size() > 1) {
-            // if the children number larger than 1, persist the dataframe for performance
-            curDataFrame.persist();
-        }
-        int curIndexId = curNode.indexId;
-        System.out.println("336, curNode index:" + curIndexId);
-        curDataFrame.show();
-        System.out.println("338, curNode path prefix:" + pathPrefix);
-        writePartitionedAndSortedDataframeToFile(curDataFrame, pathPrefix, curIndexId);
-        return currentLevel;
     }
 
     private long getHashValue(Row row, List<String> distributeColumns, StructType dstTableSchema) {
@@ -454,12 +399,13 @@ public final class SparkDpp implements java.io.Serializable {
                 DppColumns dppColumns = new DppColumns(columns, classes);
                 // TODO: judge invalid partitionId
                 DppColumns key = new DppColumns(keyColumns, keyClasses);
-                int partitionId = partitioner.getPartition(key);
-                if (partitionId < 0) {
+                int pid = partitioner.getPartition(key);
+                if (pid < 0) {
                     // TODO: add log for invalid partition id
                 }
-                int bucketId = (int) ((getHashValue(row, distributeColumns, dstTableSchema) & 0xffffffff)
-                        % partitionInfo.partitions.get(partitionId).bucketsNum);
+                long hashValue = getHashValue(row, distributeColumns, dstTableSchema);
+                int bucketId = (int) ((hashValue & 0xffffffff) % partitionInfo.partitions.get(pid).bucketsNum);
+                int partitionId = partitionInfo.partitions.get(pid).partitionId;
                 // bucketKey is partitionId_bucketId
                 String bucketKey = Integer.toString(partitionId) + "_" + Integer.toString(bucketId);
                 return new Tuple2<String, DppColumns>(bucketKey, dppColumns);
@@ -506,10 +452,8 @@ public final class SparkDpp implements java.io.Serializable {
                                           List<String> dataSrcColumns) {
         JavaRDD<String> sourceDataRdd = spark.read().textFile(fileUrl).toJavaRDD();
         JavaRDD<Row> rowRDD = sourceDataRdd.map((Function<String, Row>) record -> {
-            // replace with source.column_seperator
             // TODO: process null value
-            //String[] attributes = record.split(source.columnSeperator);
-            String[] attributes = record.split("\t");
+            String[] attributes = record.split(source.columnSeparator);
             if (attributes.length != dataSrcColumns.size()) {
                 // update invalid row counter statistics
                 // this counter will be record in result.json
@@ -518,8 +462,6 @@ public final class SparkDpp implements java.io.Serializable {
         });
 
         Dataset<Row> dataframe = spark.createDataFrame(rowRDD, srcSchema);
-        System.out.println("out src dataframe:");
-        dataframe.show();
         return dataframe;
     }
 
@@ -551,14 +493,12 @@ public final class SparkDpp implements java.io.Serializable {
                 partitionRangeKeys.add(new DppColumns(endKeys, partitionKeySchema));
             }
         }
+        // sort the partition range keys to make sure it is asc order
         Collections.sort(partitionRangeKeys);
         return partitionRangeKeys;
     }
 
     public void doDpp() throws Exception {
-        Gson gson = new Gson();
-        System.err.println("job configuration:" + gson.toJson(jobConf));
-
         SparkSession spark = SparkSession
                 .builder()
                 .master("local")
@@ -569,11 +509,6 @@ public final class SparkDpp implements java.io.Serializable {
             Integer tableId = entry.getKey();
             TableMeta tableMeta = entry.getValue();
             StructType dstTableSchema = createDstTableSchema(tableMeta.columns, false);
-            List<Class> fieldClasses = new ArrayList<>();
-            for (StructField field : dstTableSchema.fields()) {
-                Class fieldClass = dataTypeToClass(field.dataType());
-                fieldClasses.add(fieldClass);
-            }
 
             // get the base index meta
             IndexMeta baseIndex = null;
@@ -617,6 +552,10 @@ public final class SparkDpp implements java.io.Serializable {
                 StructType srcSchema = createScrSchema(dataSrcColumns);
                 List<String> fileUrls = source.fileUrls;
                 for (String fileUrl : fileUrls) {
+                    if (source.columnSeparator == null) {
+                        System.out.println("invalid null column separator!");
+                        System.exit(-1);
+                    }
                     Dataset<Row> dataframe = loadDataFromPath(spark, source, fileUrl, srcSchema, dataSrcColumns);
                     dataframe = convertSrcDataframeToDstDataframe(dataframe, srcSchema,dstTableSchema);
 
@@ -630,26 +569,7 @@ public final class SparkDpp implements java.io.Serializable {
                             keyColumnNames, valueColumnNames,
                             dstTableSchema, tableMeta);
 
-                    processRollupTree(rootNode, dataframe, tableMeta, baseIndex);
-                    /*
-                    Queue<RollupTreeNode> nodeQueue = new LinkedList<>();
-                    nodeQueue.offer(rootNode);
-                    int currentLevel = 0;
-                    // level travel the tree
-                    Map<Integer, Dataset<Row>> parentDataframeMap = new HashMap<>();
-                    parentDataframeMap.put(baseIndex.indexId, dataframe);
-                    Map<Integer, Dataset<Row>> childrenDataframeMap = new HashMap<>();
-                    String pathPrefix = jobConf.output_path + "/" + jobLabel() + "/" + System.currentTimeMillis();
-                    while (!nodeQueue.isEmpty()) {
-                        RollupTreeNode curNode = nodeQueue.poll();
-                        if (curNode.children != null) {
-                            for (RollupTreeNode child : curNode.children) {
-                                nodeQueue.offer(child);
-                            }
-                        }
-                        currentLevel = processRollupTreeNode(curNode, currentLevel, tableMeta, pathPrefix, parentDataframeMap, childrenDataframeMap);
-                    }
-                    */
+                    processRollupTree(rootNode, dataframe, tableId, tableMeta, baseIndex);
                 }
             }
         }
