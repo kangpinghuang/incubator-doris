@@ -22,7 +22,11 @@ import com.google.gson.JsonSyntaxException;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.spark.Partitioner;
-import org.apache.spark.sql.*;
+import org.apache.spark.sql.RowFactory;
+import org.apache.spark.sql.Row;
+import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.Column;
+import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.types.DataType;
 import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.StructField;
@@ -104,6 +108,36 @@ public final class SparkDpp implements java.io.Serializable {
             return Short.class;
         }
         return null;
+    }
+
+    private Class columnTypeToClass(ColumnType columnType) {
+        switch (columnType) {
+            case BOOL:
+                return Boolean.class;
+            case TINYINT:
+            case SMALLINT:
+                return Short.class;
+            case INT:
+                return Integer.class;
+            case DATETIME:
+            case BIGINT:
+            case LARGEINT:
+                return Long.class;
+            case FLOAT:
+                return Float.class;
+            case DOUBLE:
+                return Double.class;
+            case DATE:
+                return Date.class;
+            case HLL:
+            case CHAR:
+            case VARCHAR:
+            case BITMAP:
+            case OBJECT:
+                return String.class;
+            default:
+                return String.class;
+        }
     }
 
     private DataType columnTypeToDataType(ColumnType columnType) {
@@ -483,17 +517,34 @@ public final class SparkDpp implements java.io.Serializable {
         List<DppColumns> partitionRangeKeys = new ArrayList<>();
         for (PartitionInfo.PartitionDescription partitionDescription : partitionInfo.partitions) {
             List<Object> keys = new ArrayList<>();
-            for (Short value : partitionDescription.startKeys) {
-                keys.add(value);
-                System.out.println("add partition:" + value);
+            for (int i = 0; i < partitionDescription.startKeys.size(); i++) {
+                Long value = partitionDescription.startKeys.get(i);
+                if (partitionKeySchema.get(i).equals(Short.class)) {
+                    System.out.println("partitionKeySchema index:" + i + ", schema is short");
+                    keys.add(value.shortValue());
+                } else if (partitionKeySchema.get(i).equals(Integer.class)) {
+                    System.out.println("partitionKeySchema index:" + i + ", schema is int");
+                    keys.add(value.intValue());
+                } else if (partitionKeySchema.get(i).equals(Long.class)) {
+                    System.out.println("partitionKeySchema index:" + i + ", schema is long");
+                    keys.add(value);
+                }
             }
             partitionRangeKeys.add(new DppColumns(keys, partitionKeySchema));
             if (partitionDescription.isMaxPartition) {
                 List<Object> endKeys = new ArrayList<>();
-                //List<Class> endKeysClasses = new ArrayList<>();
-                for (Short value : partitionDescription.endKeys) {
-                    endKeys.add(value);
-                    System.out.println("add partition:" + value);
+                for (int i = 0; i < partitionDescription.endKeys.size(); i++) {
+                    Long value = partitionDescription.endKeys.get(i);
+                    if (partitionKeySchema.get(i).equals(Short.class)) {
+                        System.out.println("end partitionKeySchema index:" + i + ", schema is short");
+                        endKeys.add(value.shortValue());
+                    } else if (partitionKeySchema.get(i).equals(Integer.class)) {
+                        System.out.println("end partitionKeySchema index:" + i + ", schema is int");
+                        endKeys.add(value.intValue());
+                    } else if (partitionKeySchema.get(i).equals(Long.class)) {
+                        System.out.println("en partitionKeySchema index:" + i + ", schema is long");
+                        endKeys.add(value);
+                    }
                 }
                 partitionRangeKeys.add(new DppColumns(endKeys, partitionKeySchema));
             }
@@ -543,13 +594,12 @@ public final class SparkDpp implements java.io.Serializable {
                     IndexMeta.ColumnDescription columnDescription = baseIndex.columns.get(i);
                     if (columnDescription.columnName.equals(key)) {
                         partitionKeyIndex.add(i);
-                        partitionKeySchema.add(dataTypeToClass(columnTypeToDataType(columnDescription.columnType)));
+                        partitionKeySchema.add(columnTypeToClass(columnDescription.columnType));
                         break;
                     }
                 }
             }
             List<DppColumns> partitionRangeKeys = createPartitionRangeKeys(partitionInfo, partitionKeySchema);
-            LOG.info("partitionRangeKeys:" + partitionRangeKeys);
             StructType dstTableSchema = createDstTableSchema(baseIndex.columns, false);
             RollupTreeBuilder rollupTreeParser = new MinimalCoverRollupTreeBuilder();
             RollupTreeNode rootNode = rollupTreeParser.build(tableMeta);

@@ -18,10 +18,7 @@
 package org.apache.doris.dpp;
 
 import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.List;
-import java.util.Objects;
+import java.util.*;
 
 class DppColumns implements Comparable<DppColumns>, Serializable {
     public List<Object> columns;
@@ -59,11 +56,17 @@ class DppColumns implements Comparable<DppColumns>, Serializable {
             } else if (columns.get(i) instanceof Long) {
                 cmp = ((Long)(this.columns.get(i))).compareTo((Long)(other.columns.get(i)));
             }  else if (columns.get(i) instanceof  Boolean) {
-                cmp = ((Long)(this.columns.get(i))).compareTo((Long)(other.columns.get(i)));
+                cmp = ((Boolean)(this.columns.get(i))).compareTo((Boolean) (other.columns.get(i)));
             } else if (columns.get(i) instanceof  Short) {
                 cmp = ((Short)(this.columns.get(i))).compareTo((Short)(other.columns.get(i)));
             } else if (columns.get(i) instanceof  Float) {
-                cmp = ((Short)(this.columns.get(i))).compareTo((Short)(other.columns.get(i)));
+                cmp = ((Float)(this.columns.get(i))).compareTo((Float) (other.columns.get(i)));
+            } else if (columns.get(i) instanceof Double) {
+                cmp = ((Double)(this.columns.get(i))).compareTo((Double) (other.columns.get(i)));
+            } else if (columns.get(i) instanceof Date) {
+                cmp = ((Date)(this.columns.get(i))).compareTo((Date) (other.columns.get(i)));
+            } else {
+                cmp = ((String)(this.columns.get(i))).compareTo((String) (other.columns.get(i)));
             }
             if (cmp != 0) {
                 return cmp;

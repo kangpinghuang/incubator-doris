@@ -40,10 +40,10 @@ public class PartitionInfo implements Serializable {
         int partitionId;
 
         @SerializedName("start_keys")
-        public List<Short> startKeys;
+        public List<Long> startKeys;
 
         @SerializedName("end_keys")
-        public List<Short> endKeys;
+        public List<Long> endKeys;
 
         @SerializedName("is_max_partition")
         public boolean isMaxPartition;
