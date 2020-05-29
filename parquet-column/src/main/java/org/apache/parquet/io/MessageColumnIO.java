@@ -110,6 +110,10 @@ public class MessageColumnIO extends GroupColumnIO {
       @Override
       public RecordReader<T> visit(FilterPredicateCompat filterPredicateCompat) {
 
+        // 如果有谓词，就会走这个逻辑
+        // 这个是生成一个带过滤条件的RecordReaderImplementation
+        // 下游会通过FilteringGroupConverter和FilteringPrimitiveConverter进行predicate条件的过滤
+        // 主要逻辑可以通过FilteringGroupConverter.getCurrentRecord()作为入口进行跟踪
         FilterPredicate predicate = filterPredicateCompat.getFilterPredicate();
         IncrementallyUpdatedFilterPredicateBuilder builder = new IncrementallyUpdatedFilterPredicateBuilder(leaves);
         IncrementallyUpdatedFilterPredicate streamingPredicate = builder.build(predicate);
@@ -126,6 +130,7 @@ public class MessageColumnIO extends GroupColumnIO {
             new ColumnReadStoreImpl(columns, filteringRecordMaterializer.getRootConverter(), getType(), createdBy));
       }
 
+      // UnboundRecordFilterCompat和NoOpFilter有什么区别？
       @Override
       public RecordReader<T> visit(UnboundRecordFilterCompat unboundRecordFilterCompat) {
         return new FilteredRecordReader<>(

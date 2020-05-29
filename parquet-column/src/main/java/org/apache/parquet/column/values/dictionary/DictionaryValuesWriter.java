@@ -1,4 +1,4 @@
-/* 
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -6,9 +6,9 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- * 
+ *
  *   http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -127,6 +127,7 @@ public abstract class DictionaryValuesWriter extends ValuesWriter implements Req
 
   @Override
   public void fallBackAllValuesTo(ValuesWriter writer) {
+    // fallback的时候会把encoded value解析之后，变成原值，写到ValuesWriter
     fallBackDictionaryEncodedData(writer);
     if (lastUsedDictionarySize == 0) {
       // if we never used the dictionary
@@ -152,6 +153,8 @@ public abstract class DictionaryValuesWriter extends ValuesWriter implements Req
 
   @Override
   public BytesInput getBytes() {
+    // 这个函数实现code的编码
+    // 使用的编码方式是rle+bitpack
     int maxDicId = getDictionarySize() - 1;
     LOG.debug("max dic id {}", maxDicId);
     int bitWidth = BytesUtils.getWidthFromMaxInt(maxDicId);
@@ -259,8 +262,11 @@ public abstract class DictionaryValuesWriter extends ValuesWriter implements Req
       if (lastUsedDictionarySize > 0) {
         // return a dictionary only if we actually used it
         PlainValuesWriter dictionaryEncoder = new PlainValuesWriter(lastUsedDictionaryByteSize, maxDictionaryByteSize, allocator);
+        // 这个地方使用keySet返回词典数据，按照insert的顺序返回的，没有排序
         Iterator<Binary> binaryIterator = binaryDictionaryContent.keySet().iterator();
         // write only the part of the dict that we used
+        // 词典的编码格式如下：
+        //     dict item length + dict item
         for (int i = 0; i < lastUsedDictionarySize; i++) {
           Binary entry = binaryIterator.next();
           dictionaryEncoder.writeBytes(entry);

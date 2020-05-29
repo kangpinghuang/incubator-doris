@@ -1,4 +1,4 @@
-/* 
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -6,9 +6,9 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- * 
+ *
  *   http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -273,6 +273,38 @@ class RecordReaderImplementation<T> extends RecordReader<T> {
       nextColumnIdxForRepLevel[i] = new int[maxRepetitionLevel+1];
 
       levelToClose[i] = new int[maxRepetitionLevel+1]; //next level
+      // 这段代码实现了读取一个列的时候，如何进行拼装的核心逻辑
+      // 构建状态机条状的逻辑
+      // 这里的逻辑是这样的：
+      // 1. 如果下一个repetition level是0，则切换到下一个column id去读取。而且，如果下一个column id的值等于leaves.length
+      //    则表示读取一行record已经完成（对应代码逻辑在441行）
+      // 2. 如果当前的repetition level不是0，下一个要读取的数据是下一个列的数据
+      // 3. 如果当前leave是当前repetition level的最后一个节点，则下一个要读取数据的列是这个repetition level的第一个列
+      // 几个例子：
+      // 例子1：
+      // repeated message student {
+      //     optional binary name;
+      //     required int age;
+      //     optional binary address;
+      // }
+      // 上面name/age/address都是repetition level位0；并且firstIndexForLevel[0]是name列，也就是0
+      // 所以name列读取一个数据，就读取age列，age列读完一个数据，就读取address列
+      // 这个case是最简单的场景。
+      //
+      // 例子2：
+      // repeated message document {
+      //     repeated group Name {
+      //         repeated binary f1;
+      //         repeated int f2;
+      //     }
+      // }
+      // f1的max repeatition level为2， f2的max repetition level也为2
+      //
+      // f1构造出来的firstIndexForLevel为: [0, 0, 0], nextColumnIdxForRepLevel数组位：[1, 1, 0]
+      //     这个数组表示，如果下一个rl为0，则跳到column index 1（也就是f2）去读取
+      //     如果下一个rl为1,则跳转到column index1去读取
+      //     如果下一个rl为2，这个时候leafColumnIO.isLast(2)为true，所以设置为firstIndexForLevel[nextRepLevel],也就是0，这个时候会接着读取f1的数据，也就是在读取f1数组的下一个值
+      // f2构造出来的firstIndexForLevel为: [0, 0, 1], nextColumnIdxForRepLevel数组位：[2, 0, 1]
       for (int nextRepLevel = 0; nextRepLevel <= maxRepetitionLevel; ++nextRepLevel) {
         // remember which is the first for this level
         if (leafColumnIO.isFirst(nextRepLevel)) {
@@ -310,6 +342,7 @@ class RecordReaderImplementation<T> extends RecordReader<T> {
     for (int i = 0; i < leaves.length; i++) {
       states[i] = new State(i, leaves[i], columnReaders[i], levelToClose[i], groupConverterPaths[i], leafConverters[i]);
 
+      // 存储definetion level对应的最大的depth（树的层次)
       int[] definitionLevelToDepth = new int[states[i].primitiveColumnIO.getDefinitionLevel() + 1];
       // for each possible definition level, determine the depth at which to create groups
       final ColumnIO[] path = states[i].primitiveColumnIO.getPath();
@@ -389,7 +422,13 @@ class RecordReaderImplementation<T> extends RecordReader<T> {
   @Override
   public T read() {
     int currentLevel = 0;
+    // 这个地方调用start，主要是用于构造一个T对象
+    // 具体可以参考GroupRecordConvertor，这个也是一个RecordMaterializer，用于生成group记录的记录读取器
     recordRootConverter.start();
+    // states用来控制一个列的数据读完之后，应该跳到下一个应该执行的ColumnReader
+    // 可以这么理解，states中保存的是一个状态机的状态转移逻辑
+    // 有可能是下一个列，有可能是同一个列的不同repetition level的ColumnReader
+    // 跳转的条件是依据下一行的repetition level来进行的
     State currentState = states[0];
     do {
       ColumnReader columnReader = currentState.column;
@@ -397,6 +436,7 @@ class RecordReaderImplementation<T> extends RecordReader<T> {
       // creating needed nested groups until the current field (opening tags)
       int depth = currentState.definitionLevelToDepth[d];
       for (; currentLevel <= depth; ++currentLevel) {
+        // 这里调用group类型的Convertor的start接口，用来在一个record中位置i的add一个group
         currentState.groupConverterPath[currentLevel].start();
       }
       // currentLevel = depth + 1 at this point
@@ -407,9 +447,16 @@ class RecordReaderImplementation<T> extends RecordReader<T> {
       }
       columnReader.consume();
 
+      // columnReader.getCurrentRepetitionLevel()为当前记录的repetition level
+      // columnReader会预读一行数据到内存中
+      // getCurrentRepetitionLevel返回的值是0,表示新的一行开始，下一个state应该为null
       int nextR = currentState.maxRepetitionLevel == 0 ? 0 : columnReader.getCurrentRepetitionLevel();
       // level to go to close current groups
+      // nextLevel存储的是当前repetitionlevel对应的结构树上最小的那个层级？
       int next = currentState.nextLevel[nextR];
+      // 针对当前行，在next的next level之下的的group，都已经读完，所以需要调用end
+      // current level表示结构树上的层级（也就是一颗树的层次）
+      //
       for (; currentLevel > next; currentLevel--) {
         currentState.groupConverterPath[currentLevel - 1].end();
       }
@@ -418,6 +465,7 @@ class RecordReaderImplementation<T> extends RecordReader<T> {
     } while (currentState != null);
     recordRootConverter.end();
     T record = recordMaterializer.getCurrentRecord();
+    // 在FilteringRecordMaterializer中，如果一条记录被过滤，那getCurrentRecord会返回null
     shouldSkipCurrentRecord = record == null;
     if (shouldSkipCurrentRecord) {
       recordMaterializer.skipCurrentRecord();
