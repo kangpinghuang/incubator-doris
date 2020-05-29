@@ -597,7 +597,7 @@ public class SparkLoadJob extends BulkLoadJob {
                                         tBrokerRangeDesc.setPath("");
                                         tBrokerRangeDesc.setFile_size(-1);
                                         String tabletMetaStr = String.format("%d.%d.%d.%d.%d", tableId, partitionId,
-                                                                             indexId, bucket++, schemaHash);
+                                                                             indexId, bucket, schemaHash);
                                         if (tabletMetaToFileInfo.containsKey(tabletMetaStr)) {
                                             Pair<String, Long> fileInfo = tabletMetaToFileInfo.get(tabletMetaStr);
                                             tBrokerRangeDesc.setPath(fileInfo.first);
@@ -611,6 +611,9 @@ public class SparkLoadJob extends BulkLoadJob {
                                                 brokerDesc.getName(), backend.getHost());
                                         tBrokerScanRange.getBroker_addresses().add(
                                                 new TNetworkAddress(fsBroker.ip, fsBroker.port));
+
+                                        LOG.debug("push task for replica {}, broker {}:{}, backendId {}, filePath {}, fileSize {}" ,
+                                                replicaId, fsBroker.ip, fsBroker.port, backendId, tBrokerRangeDesc.path, tBrokerRangeDesc.file_size);
 
                                         PushTask pushTask = new PushTask(backendId, dbId, tableId, partitionId,
                                                                          indexId, tabletId, replicaId, schemaHash,
@@ -630,6 +633,8 @@ public class SparkLoadJob extends BulkLoadJob {
                                         tabletFinishedReplicas.add(replicaId);
                                     }
                                 }
+
+								bucket++;
 
                                 if (tabletAllReplicas.size() == 0) {
                                     LOG.error("invalid situation. tablet is empty. id: {}", tabletId);
